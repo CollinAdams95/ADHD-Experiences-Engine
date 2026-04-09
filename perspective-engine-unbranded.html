@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>The Perspective Engine</title>
+<meta name="theme-color" content="#FAF7F2">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400;1,600&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --font-display:'Playfair Display',Georgia,serif;
+  --font-body:'Outfit',system-ui,sans-serif;
+  --bg:#FAF7F2;--text:#2D2A26;
+  --text-dim:rgba(45,42,38,0.55);--text-faint:rgba(45,42,38,0.22);
+  --mom-accent:#E8956A;--dad-accent:#6BA4D4;--sis-accent:#B882C8;
+  --reframe-accent:#6BAE8E;--self-accent:#D4A05C;
+  --mom-bg:radial-gradient(ellipse at 25% 55%,rgba(232,149,106,0.12) 0%,transparent 60%),radial-gradient(ellipse at 75% 35%,rgba(232,149,106,0.05) 0%,transparent 50%);
+  --dad-bg:radial-gradient(ellipse at 75% 55%,rgba(107,164,212,0.12) 0%,transparent 60%),radial-gradient(ellipse at 25% 35%,rgba(107,164,212,0.05) 0%,transparent 50%);
+  --sis-bg:radial-gradient(ellipse at 50% 35%,rgba(184,130,200,0.12) 0%,transparent 60%),radial-gradient(ellipse at 20% 70%,rgba(184,130,200,0.05) 0%,transparent 50%);
+  --reframe-bg:radial-gradient(ellipse at 50% 50%,rgba(107,174,142,0.1) 0%,transparent 55%),radial-gradient(ellipse at 30% 70%,rgba(212,160,92,0.05) 0%,transparent 50%);
+  --t-fast:0.3s cubic-bezier(0.4,0,0.2,1);
+  --t-med:0.5s cubic-bezier(0.4,0,0.2,1);
+  --t-slow:0.7s cubic-bezier(0.25,0.1,0.25,1);
+  --t-atm:1.2s cubic-bezier(0.25,0.1,0.25,1);
+}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--font-body);background:var(--bg);color:var(--text);-webkit-font-smoothing:auto;overscroll-behavior:none;-webkit-text-size-adjust:100%;touch-action:manipulation}
+
+/* Grain */
+.grain{position:fixed;top:0;right:0;bottom:0;left:0;z-index:9999;pointer-events:none;opacity:0.035;
+  background-size:256px 256px;background-repeat:repeat;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Progress */
+.progress-track{position:fixed;top:0;left:0;right:0;height:2px;background:rgba(45,42,38,0.04);z-index:200}
+.progress-fill{height:100%;width:0;position:relative;
+  background:linear-gradient(90deg,var(--mom-accent),var(--dad-accent),var(--sis-accent),var(--reframe-accent));
+  transition:width 0.5s cubic-bezier(0.25,0.1,0.25,1);
+}
+.progress-fill::after{
+  content:'';position:absolute;right:-4px;top:-3px;width:8px;height:8px;
+  border-radius:50%;background:var(--reframe-accent);
+  box-shadow:0 0 10px 2px rgba(107,174,142,0.4);
+  transition:opacity 0.3s;
+}
+
+/* ===== SLIDES ===== */
+.deck{position:relative;width:100%;height:100vh;height:100dvh;overflow:hidden}
+.slide{will-change:transform,opacity;
+  position:absolute;top:0;right:0;bottom:0;left:0;
+  display:flex;flex-direction:column;justify-content:center;align-items:center;
+  padding:2.5rem 2rem 5rem;text-align:center;
+  opacity:0;pointer-events:none;z-index:1;
+  transform:translateY(30px) scale(0.98);
+  transition:none;
+}
+.slide.active{opacity:1;pointer-events:auto;transform:translateY(0) scale(1);z-index:10}
+
+/* Entrance choreography classes */
+.slide.entering{transition:opacity 0.6s cubic-bezier(0.25,0.1,0.25,1),transform 0.6s cubic-bezier(0.25,0.1,0.25,1)}
+.slide.exiting-up{
+  opacity:0;transform:translateY(-40px) scale(0.97);z-index:5;
+  transition:opacity 0.45s cubic-bezier(0.4,0,1,1),transform 0.45s cubic-bezier(0.4,0,1,1);
+}
+.slide.exiting-down{
+  opacity:0;transform:translateY(40px) scale(0.97);z-index:5;
+  transition:opacity 0.45s cubic-bezier(0.4,0,1,1),transform 0.45s cubic-bezier(0.4,0,1,1);
+}
+
+/* Atmosphere */
+.atmosphere{will-change:opacity;position:absolute;top:0;right:0;bottom:0;left:0;transition:opacity var(--t-atm);opacity:0;pointer-events:none;z-index:1}
+.atmosphere.visible{opacity:1}
+
+/* Stagger children on active slide */
+.slide.active .stagger{opacity:0;animation:staggerIn 0.55s forwards}
+@keyframes staggerIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+.slide.active .stagger:nth-child(1){animation-delay:0.08s}
+.slide.active .stagger:nth-child(2){animation-delay:0.16s}
+.slide.active .stagger:nth-child(3){animation-delay:0.26s}
+.slide.active .stagger:nth-child(4){animation-delay:0.36s}
+.slide.active .stagger:nth-child(5){animation-delay:0.44s}
+.slide.active .stagger:nth-child(6){animation-delay:0.52s}
+.slide.active .stagger:nth-child(7){animation-delay:0.60s}
+
+/* Reset button styling for iOS */
+button{-webkit-appearance:none;-moz-appearance:none;appearance:none;outline:none;}
+button:focus-visible{outline:2px solid var(--reframe-accent);outline-offset:2px}
+a{-webkit-tap-highlight-color:transparent}
+
+/* ===== HERO ===== */
+.hero-content{position:relative;z-index:2;max-width:640px}
+.hero-title{
+  font-family:var(--font-display);font-size:clamp(2.6rem,7vw,5rem);
+  line-height:1.08;font-weight:400;margin-bottom:1.5rem;
+}
+.hero-title em{font-style:italic;color:var(--reframe-accent)}
+.hero-sub{
+  font-size:clamp(0.95rem,2.2vw,1.15rem);color:var(--text-dim);
+  line-height:1.75;font-weight:300;max-width:480px;margin:0 auto 3rem;
+}
+.hero-begin{touch-action:manipulation;
+  display:inline-flex;align-items:center;gap:0.6rem;
+  padding:0.9rem 2rem;background:rgba(45,42,38,0.06);
+  border:1px solid rgba(45,42,38,0.12);border-radius:100px;
+  color:var(--text);font-family:var(--font-body);font-size:0.85rem;font-weight:500;
+  cursor:pointer;transition:var(--t-fast);position:relative;overflow:hidden;
+}
+.hero-begin:hover{background:rgba(45,42,38,0.1);border-color:rgba(45,42,38,0.2);transform:translateY(-1px)}
+.hero-begin:active{transform:scale(0.97)}
+.hero-begin svg{transition:transform 0.3s}
+.hero-begin:hover svg{transform:translateX(4px)}
+
+/* ===== ACT ===== */
+.act-content{position:relative;z-index:2}
+.act-num{font-size:0.65rem;font-weight:600;letter-spacing:0.3em;text-transform:uppercase;color:var(--text-faint);margin-bottom:1rem}
+.act-name{font-family:var(--font-display);font-size:clamp(2rem,5vw,3.2rem);line-height:1.15;font-weight:400;margin-bottom:1rem}
+.act-theme{font-family:var(--font-display);font-style:italic;font-size:clamp(0.95rem,2vw,1.1rem);color:var(--text-dim)}
+
+/* ===== THEME ===== */
+.theme-inner{position:relative;z-index:2;max-width:680px;width:100%}
+.theme-num{font-size:0.6rem;font-weight:600;letter-spacing:0.25em;text-transform:uppercase;color:var(--text-faint);margin-bottom:0.75rem}
+.theme-title{
+  font-family:var(--font-display);font-size:clamp(1.35rem,3.5vw,1.9rem);
+  line-height:1.2;font-weight:400;margin-bottom:0.6rem;
+  transition:color var(--t-med);
+}
+.core-truth{
+  font-family:var(--font-display);font-style:italic;
+  font-size:clamp(0.88rem,2vw,1.02rem);color:var(--text-dim);margin-bottom:2.2rem;
+  transition:color var(--t-med);
+}
+
+/* Perspective buttons */
+.persp-btns{display:flex;justify-content:center;gap:0.35rem;margin-bottom:1.8rem;flex-wrap:wrap}
+.persp-btn{touch-action:manipulation;
+  padding:0.5rem 1.1rem;font-family:var(--font-body);font-size:0.76rem;font-weight:500;
+  border:1px solid rgba(45,42,38,0.08);border-radius:100px;
+  background:transparent;color:var(--text-dim);cursor:pointer;
+  transition:all var(--t-fast);position:relative;overflow:hidden;
+}
+.persp-btn:hover{border-color:rgba(45,42,38,0.18);color:var(--text)}
+.persp-btn:active{transform:scale(0.95)}
+.persp-btn.active-mom{border-color:rgba(232,149,106,0.35);color:var(--mom-accent);background:rgba(232,149,106,0.08)}
+.persp-btn.active-dad{border-color:rgba(107,164,212,0.35);color:var(--dad-accent);background:rgba(107,164,212,0.08)}
+.persp-btn.active-sis{border-color:rgba(184,130,200,0.35);color:var(--sis-accent);background:rgba(184,130,200,0.08)}
+.persp-btn.active-reframe{border-color:rgba(107,174,142,0.4);color:var(--reframe-accent);background:rgba(107,174,142,0.08)}
+
+/* Perspective display */
+.persp-display{position:relative}
+.persp-panel{
+  position:absolute;top:0;right:0;bottom:0;left:0;opacity:0;pointer-events:none;
+  display:flex;flex-direction:column;justify-content:center;
+  transition:opacity 0.4s ease,transform 0.4s ease;
+}
+/* Reframe panel: relative flow so it expands container, hidden via opacity+visibility */
+.persp-panel[data-panel="reframe"]{
+  position:relative;top:auto;right:auto;bottom:auto;left:auto;
+  visibility:hidden;max-height:0;overflow:hidden;
+  transition:opacity 0.4s ease,transform 0.4s ease,max-height 0.4s ease,visibility 0s 0.4s;
+}
+.persp-panel[data-panel="reframe"].visible{
+  visibility:visible;max-height:500px;overflow:visible;
+  transition:opacity 0.4s ease,transform 0.4s ease,max-height 0.5s ease,visibility 0s 0s;
+}
+/* Spacer for non-reframe panels */
+.persp-spacer{min-height:160px}
+.persp-panel.from-left{transform:translateX(-20px)}
+.persp-panel.from-right{transform:translateX(20px)}
+.persp-panel.from-top{transform:translateY(-16px)}
+.persp-panel.from-center{transform:scale(0.96)}
+.persp-panel.visible{opacity:1;transform:translateX(0) translateY(0) scale(1);pointer-events:auto}
+
+.persp-label{font-size:0.6rem;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:0.6rem;transition:color var(--t-fast)}
+.persp-quote{font-size:clamp(1rem,2.5vw,1.15rem);line-height:1.7;font-weight:300;color:var(--text);max-width:500px;margin:0 auto}
+
+/* Storyline */
+.storyline{
+  margin-top:1.8rem;padding:0.9rem 1.3rem;
+  border-left:2px solid var(--self-accent);text-align:left;
+  max-width:500px;margin-left:auto;margin-right:auto;opacity:0.92;
+}
+.storyline-label{font-size:0.6rem;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:var(--self-accent);margin-bottom:0.4rem}
+.storyline p{font-family:var(--font-body);font-weight:300;font-size:0.95rem;line-height:1.7;letter-spacing:0.01em}
+
+/* Reframe */
+.reframe-container{max-width:520px;margin:0 auto;text-align:left}
+.reframe-label-main{font-size:0.55rem;font-weight:600;letter-spacing:0.25em;text-transform:uppercase;color:var(--reframe-accent);margin-bottom:1.2rem;text-align:center}
+.reframe-block{padding:0.9rem 1.1rem;border-radius:10px;margin-bottom:1rem}
+.reframe-looked{background:rgba(45,42,38,0.025);border:1px solid rgba(45,42,38,0.05)}
+.reframe-was{background:rgba(107,174,142,0.04);border:1px solid rgba(107,174,142,0.1)}
+.reframe-block-label{font-size:0.55rem;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:0.35rem}
+.reframe-looked .reframe-block-label{color:var(--text-faint)}
+.reframe-was .reframe-block-label{color:var(--reframe-accent)}
+.reframe-text{font-size:0.88rem;line-height:1.65;font-weight:300}
+.reframe-looked .reframe-text{color:var(--text-dim)}
+.reframe-was .reframe-text{color:var(--text)}
+
+/* ===== NAV ===== */
+.nav-bar{
+  position:fixed;bottom:0;left:0;right:0;z-index:100;
+  display:flex;justify-content:space-between;align-items:center;
+  padding:1rem 1.5rem;
+  background:linear-gradient(transparent 0%,rgba(250,247,242,0.9) 40%,rgba(250,247,242,0.98) 100%);
+}
+.nav-btn{touch-action:manipulation;
+  display:flex;align-items:center;gap:0.4rem;padding:0.55rem 1.1rem;
+  font-family:var(--font-body);font-size:0.74rem;font-weight:500;
+  border:1px solid rgba(45,42,38,0.08);border-radius:100px;
+  background:rgba(250,247,242,0.5);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
+  color:var(--text-dim);cursor:pointer;transition:var(--t-fast);
+  position:relative;overflow:hidden;
+}
+.nav-btn:hover{border-color:rgba(45,42,38,0.18);color:var(--text)}
+.nav-btn:active{transform:scale(0.96)}
+.nav-btn:disabled{opacity:0.15;cursor:default;transform:none}
+
+/* ===== PAUSE ===== */
+.pause-content{position:relative;z-index:2;max-width:500px}
+.pause-label{font-size:0.6rem;font-weight:600;letter-spacing:0.25em;text-transform:uppercase;color:var(--text-faint);margin-bottom:1.5rem}
+.pause-question{font-family:var(--font-display);font-style:italic;font-size:clamp(1.2rem,3vw,1.5rem);line-height:1.4;margin-bottom:2rem}
+.pause-opts{display:flex;flex-direction:column;gap:0.45rem;align-items:center}
+.pause-opt{touch-action:manipulation;
+  padding:0.65rem 1.4rem;width:100%;max-width:380px;
+  font-family:var(--font-body);font-size:0.8rem;font-weight:400;
+  border:1px solid rgba(45,42,38,0.07);border-radius:10px;
+  background:transparent;color:var(--text-dim);cursor:pointer;
+  transition:var(--t-fast);text-align:center;position:relative;overflow:hidden;
+}
+.pause-opt:hover{border-color:rgba(45,42,38,0.14);color:var(--text);background:rgba(45,42,38,0.02)}
+.pause-opt:active{transform:scale(0.98)}
+.pause-opt.picked{border-color:rgba(107,174,142,0.3);color:var(--reframe-accent);background:rgba(107,174,142,0.05)}
+
+/* ===== CLOSING ===== */
+.closing-content{position:relative;z-index:2;max-width:560px}
+.closing-rule{width:50px;height:1px;background:rgba(45,42,38,0.15);margin:0 auto 2.5rem}
+.closing-title{font-family:var(--font-display);font-size:clamp(2rem,5vw,3rem);line-height:1.15;font-weight:400;margin-bottom:2rem}
+.closing-title em{font-style:italic;color:var(--reframe-accent)}
+.closing-truths{list-style:none;margin-bottom:2rem}
+.closing-truths li{font-size:1rem;color:var(--text-dim);line-height:1.7;font-weight:300}
+.closing-final{font-family:var(--font-display);font-style:italic;font-size:1.1rem;line-height:1.6;margin-bottom:2.5rem}
+
+/* ===== SPARKLE SYSTEM ===== */
+.sparkle-icon{
+  position:fixed;pointer-events:none;z-index:10000;
+  width:32px;height:32px;
+  opacity:0;
+}
+.sparkle-icon.burst{
+  animation:sparkleBurst 0.8s cubic-bezier(0.25,0.1,0.25,1) forwards;
+}
+@keyframes sparkleBurst{
+  0%{opacity:0;transform:scale(0.3) rotate(-30deg)}
+  25%{opacity:1;transform:scale(1.3) rotate(15deg)}
+  50%{opacity:0.9;transform:scale(1) rotate(0deg)}
+  75%{opacity:0.5;transform:scale(0.8) rotate(-8deg) translateY(-20px)}
+  100%{opacity:0;transform:scale(0.4) rotate(-15deg) translateY(-40px)}
+}
+
+/* Particle sparkles */
+.sparkle-particle{
+  position:fixed;pointer-events:none;z-index:9998;
+  width:4px;height:4px;border-radius:50%;
+  opacity:0;
+}
+.sparkle-particle.burst{
+  animation:particleBurst 0.7s cubic-bezier(0.25,0.1,0.25,1) forwards;
+}
+@keyframes particleBurst{
+  0%{opacity:0;transform:scale(0) translate(0,0)}
+  20%{opacity:1;transform:scale(1.5)}
+  100%{opacity:0;transform:scale(0) translate(var(--px),var(--py))}
+}
+
+/* ===== JOURNEY MAP ===== */
+.journey-content{position:relative;z-index:2;max-width:520px;width:100%}
+.journey-label{font-size:0.6rem;font-weight:600;letter-spacing:0.25em;text-transform:uppercase;color:var(--text-faint);margin-bottom:1.8rem}
+.journey-title{font-family:var(--font-display);font-size:clamp(1.5rem,3.5vw,2rem);line-height:1.25;margin-bottom:2.2rem}
+.journey-acts{display:flex;flex-direction:column;gap:0;margin-bottom:2.5rem;position:relative}
+.journey-act{
+  display:flex;align-items:flex-start;gap:1.2rem;padding:1rem 0;
+  position:relative;
+}
+.journey-act:not(:last-child)::after{
+  content:'';position:absolute;left:15px;top:2.6rem;bottom:0;width:1px;
+  background:linear-gradient(to bottom,rgba(45,42,38,0.12),rgba(45,42,38,0.04));
+}
+.journey-dot{
+  width:32px;height:32px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-body);font-size:0.55rem;font-weight:600;
+  border:1px solid rgba(45,42,38,0.12);color:var(--text-dim);
+  position:relative;z-index:1;background:var(--bg);
+}
+.journey-act:nth-child(1) .journey-dot{border-color:rgba(232,149,106,0.25);color:var(--mom-accent)}
+.journey-act:nth-child(2) .journey-dot{border-color:rgba(107,164,212,0.25);color:var(--dad-accent)}
+.journey-act:nth-child(3) .journey-dot{border-color:rgba(184,130,200,0.25);color:var(--sis-accent)}
+.journey-act:nth-child(4) .journey-dot{border-color:rgba(107,174,142,0.3);color:var(--reframe-accent)}
+.journey-act-info{flex:1;text-align:left}
+.journey-act-name{font-family:var(--font-display);font-size:0.95rem;line-height:1.3;margin-bottom:0.2rem}
+.journey-act-theme{font-size:0.78rem;color:var(--text-dim);font-style:italic;font-weight:300}
+.journey-act-count{font-size:0.65rem;color:var(--text-faint);margin-top:0.15rem}
+.journey-begin{touch-action:manipulation;
+  display:inline-flex;align-items:center;gap:0.6rem;
+  padding:0.9rem 2rem;background:rgba(45,42,38,0.06);
+  border:1px solid rgba(45,42,38,0.12);border-radius:100px;
+  color:var(--text);font-family:var(--font-body);font-size:0.85rem;font-weight:500;
+  cursor:pointer;transition:var(--t-fast);position:relative;overflow:hidden;
+}
+.journey-begin:hover{background:rgba(45,42,38,0.1);border-color:rgba(45,42,38,0.2);transform:translateY(-1px)}
+.journey-begin:active{transform:scale(0.97)}
+.journey-begin svg{transition:transform 0.3s}
+.journey-begin:hover svg{transform:translateX(4px)}
+.journey-time{font-size:0.7rem;color:var(--text-faint);margin-top:1.2rem}
+
+/* ===== SEGMENTED ACT PROGRESS ===== */
+.act-progress{display:flex;align-items:center;gap:0.3rem}
+.act-seg{
+  display:flex;align-items:center;gap:0.15rem;
+}
+.act-seg-dot{
+  width:6px;height:6px;border-radius:50%;
+  background:rgba(45,42,38,0.08);
+  transition:background 0.4s ease,transform 0.3s ease,box-shadow 0.4s ease;
+}
+.act-seg-dot.filled{background:rgba(45,42,38,0.3);transform:scale(1.1)}
+.act-seg-dot.current{
+  background:var(--text);transform:scale(1.3);
+  box-shadow:0 0 8px 2px rgba(107,174,142,0.35);
+}
+.act-seg-gap{width:8px;height:1px;background:rgba(45,42,38,0.06)}
+.act-seg-label{
+  font-size:0.5rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;
+  color:var(--text-faint);margin-right:0.15rem;
+  transition:color 0.3s;
+}
+.act-seg-label.active-label{color:var(--text-dim)}
+
+/* ===== RESPONSIVE ===== */
+@media(max-height:600px){.slide{padding-top:1rem;padding-bottom:4rem}.theme-inner{overflow-y:auto;max-height:calc(100vh - 5rem);max-height:calc(100dvh - 5rem)}.hero-title{font-size:2rem}.act-name{font-size:1.6rem}}
+@media(max-width:600px){
+  .slide{will-change:transform,opacity;padding:2rem 1.25rem 4.5rem}
+  .nav-bar{padding:0.7rem 1rem}
+  .persp-btns{gap:0.25rem}
+  .persp-btn{touch-action:manipulation;padding:0.42rem 0.8rem;font-size:0.7rem}
+  .persp-spacer{min-height:140px}
+  .hero-title{font-size:clamp(2.2rem,8vw,3.5rem)}
+}
+
+/* Respect reduced motion preferences */
+@media(prefers-reduced-motion:reduce){
+  .slide,.atmosphere,.persp-panel,.sparkle-icon,.sparkle-particle{transition-duration:0.01ms !important;animation-duration:0.01ms !important}
+  .slide.active .stagger{animation:none !important;opacity:1 !important}
+  .progress-fill{transition-duration:0.01ms !important}
+}
+</style>
+</head>
+<body>
+
+<div class="grain"></div>
+<div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+
+<div class="deck" id="deck"></div>
+
+<nav class="nav-bar" id="navBar" style="display:none">
+  <button class="nav-btn" id="prevBtn" onclick="go(-1)">
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 2L4 7l5 5"/></svg>
+    Back
+  </button>
+  <div class="act-progress" id="actProgress"></div>
+  <button class="nav-btn" id="nextBtn" onclick="go(1)">
+    Next
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2l5 5-5 5"/></svg>
+  </button>
+</nav>
+
+<script>
+const LOGO="";
+const ICON="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";
+
+const THEMES=[
+{num:"01",title:"Regulation Through Stimulation, Play, and Motion",truth:"Stillness dysregulates. Engagement stabilizes.",
+mom:"Life as play. Constant movement. Sports as calming. School as painfully slow.",
+dad:'A kid who was always "doing." Tactile, playful, on the floor, outside, always in motion.',
+sis:"Grit and drive for sports, none for anything else.",
+story:"When life moved, I settled. But when it slowed down, everything inside me sped up.",
+looked:"Hyperactive. Can't sit still. Disruptive. Only cares about sports.",
+was:"Self-regulation through movement. A nervous system seeking the input it needed to stabilize."},
+{num:"02",title:"Interest-Based Attention",truth:"Attention isn't missing. It's gated by interest.",
+mom:"Baseball lit him up. School never did.",
+dad:"Ridiculous recall for sports stats. Homework forgotten. Reading went nowhere.",
+sis:"Obsession-level focus, but only for what he chose.",
+story:"I wasn't unfocused. I was focused, just not on demand.",
+looked:"Lazy. Selective. Doesn't try. Only pays attention when he wants to.",
+was:"An interest-driven nervous system. Attention gated by dopamine, not willpower."},
+{num:"03",title:"Movement as Emotional and Cognitive Regulation",truth:"The body moves to help the brain cope.",
+mom:'Climbing, hiding, standing up under tables, early "misbehavior."',
+dad:"Constant activity. Sports and physical play were just his baseline.",
+sis:"Risk-taking as escape. He once fell down the stairs just to get out of timeout.",
+story:"My body figured things out before my words could.",
+looked:"Reckless. Wild. Dangerous. Needs to calm down.",
+was:"A body that processed emotions through motion before the brain could name them."},
+{num:"04",title:"Impulsivity and Vanishing Context",truth:"Action often outruns awareness.",
+mom:"Rules forgotten mid-moment. Trouble early and often.",
+dad:"Heat-of-the-moment blowups, especially in competition.",
+sis:"Explosive reactions triggered anywhere, anytime.",
+story:"I didn't break the rules on purpose. They just disappeared.",
+looked:"Defiant. Disobedient. Doesn't listen. Chooses to break rules.",
+was:"Working memory gaps. The rule existed, then simply vanished from consciousness the moment it mattered most."},
+{num:"05",title:"Deep Need for Safety, Structure, and Predictability",truth:"External structure calms internal chaos.",
+mom:"Needing to know where she was so he could sleep. Words of reassurance as security.",
+dad:"Routines everywhere, because inside felt unsteady.",
+sis:"Same lunch every day. Same hair products. Same patterns repeated without exception.",
+story:"I wanted freedom, but only if I knew I was safe.",
+looked:"Rigid. Controlling. Anxious. Picky eater. Set in his ways.",
+was:"A nervous system building scaffolding. Predictability was the anchor when everything inside felt unpredictable."},
+{num:"06",title:"Emotional Intensity and Rapid Shifts",truth:"Feelings arrive loud, fast, and full.",
+mom:"Sharp words during punishment. Big reactions early and often.",
+dad:'"Boy of a thousand faces." Full of anger at night, pure joy by morning.',
+sis:"Buttons everywhere. One touch and the whole thing exploded.",
+story:"My emotions didn't whisper. They showed up all at once.",
+looked:"Dramatic. Overreacting. Manipulative. Moody. Needs to toughen up.",
+was:"Emotional dysregulation. A brain without a volume dial. Every feeling arrived at full intensity, with no buffer."},
+{num:"07",title:"High Relational Sensitivity and Attachment",truth:"Connection regulates the nervous system.",
+mom:"Needing her presence clearly defined. Baseball as their bonding language.",
+dad:"Easily made friends everywhere. Drawn to connection naturally.",
+sis:"Casual relationships came easily. Friends felt natural and constant.",
+story:"People weren't distractions. They were anchors.",
+looked:"Clingy. Needy. Codependent. Too social. Can't be alone.",
+was:"Relational co-regulation. People were the external nervous system support that brought internal calm."},
+{num:"08",title:"Social Magnetism Without Wanting the Spotlight",truth:"Drawn to people, not performance.",
+mom:"The house as a safe hub for friends. Always gathering people around.",
+dad:"Fun, silly, engaging. Naturally social without even trying to be.",
+sis:'"Don\'t look at me!" Wanted the attention without the exposure.',
+story:"I wanted connection, not a stage.",
+looked:"Class clown. Attention seeker. Show-off. Contradictory.",
+was:"A deep need for connection paired with rejection sensitivity. He wanted to belong, but without the vulnerability of being seen."},
+{num:"09",title:"Creativity, Imagination, and Identity Expression",truth:"Self-expression is regulation.",
+mom:"Costumes worn in public. Clothes treated as personality. Self-expression was a daily project.",
+dad:"Dress-up, nicknames, make-believe, humor. A constantly shifting creative world.",
+sis:"A strong identity built from hair, preferences, and obsessions that defined entire seasons of life.",
+story:"I didn't express myself for attention. I did it to feel like me.",
+looked:"Weird. Attention-seeking. Won't conform. Going through a phase.",
+was:"Identity regulation. External expression creating internal coherence. When the inside feels chaotic, the outside becomes the anchor."},
+{num:"10",title:"Executive Dysfunction",truth:"Knowing doesn't equal doing.",
+mom:"Intelligence without follow-through. Potential that never landed.",
+dad:"Systems, reminders, and support structures were all in place. Still overwhelmed.",
+sis:"No tolerance for forced tasks. Immediate frustration the moment something felt imposed.",
+story:"Every assignment weighed more than it looked.",
+looked:"Lazy. Not applying himself. Wasting potential. Doesn't care enough.",
+was:"Executive dysfunction. The bridge between intention and action was broken. The intention itself never was."},
+{num:"11",title:"Contrast With Others Amplifying Shame",truth:"Difference becomes loud in comparison.",
+mom:"A school system that misread regulation as misbehavior. The labels started forming early.",
+dad:"ADHD masked by obedience. Missed entirely because of it.",
+sis:'"Lindsay loved school. I hated it." The contrast became the story.',
+story:"I learned who I was by watching who I wasn't.",
+looked:"The difficult one. The problem child. Why can't you be more like your sister?",
+was:"Shame born from comparison. Two different brains living in the same house. One visible, one invisible. Each suffering differently."},
+{num:"12",title:"Adolescence as the Breaking Point",truth:"Demands eventually outgrow coping strategies.",
+mom:"Withdrawal, frustration, and confusion. A child slowly retreating inward.",
+dad:"Mood swings, reading struggles, and emotional volatility that just kept intensifying.",
+sis:"Short fuse, low tolerance, relational strain becoming constant.",
+story:"My brain didn't change. Life just asked more of it.",
+looked:"Teenage rebellion. Bad attitude. Choosing not to try. Getting worse.",
+was:"A nervous system hitting its ceiling. The strategies that worked in childhood couldn't scale with adolescent demands."},
+{num:"13",title:"Growth Through Awareness, Not Suppression",truth:"Understanding unlocks regulation.",
+mom:"An emotional letting go. Peace found through meaning. A son finally finding his own language.",
+dad:"Real strategy, genuine follow-through, emotional steadiness. Growth that was visible and undeniable.",
+sis:"Perspective-taking, patience, brain care. A brother who started making sense of himself.",
+story:"I didn't fix my brain. I finally learned how to work with it.",
+looked:"He finally grew up. Matured. Got serious.",
+was:"Not maturity. Understanding. The brain didn't change. The relationship with it did."},
+{num:"14",title:"Retained Strengths, Refined Expression",truth:"The goal isn't removal. It's integration.",
+mom:"Depth, connection, and storytelling. The same fire, just channeled differently.",
+dad:"Empathy, critical thinking, and leadership. The strengths had always been there.",
+sis:"Still intense, but more centered now. The same person, just more at home in himself.",
+story:"I kept the fire. I just stopped burning everything down.",
+looked:"He finally calmed down. Settled. Became normal.",
+was:"Integration, not suppression. The intensity remained. It just found its place."}
+];
+
+const ACTS=[
+{num:"I",name:"The External World Misreads the Internal",theme:'"What you saw vs. what was happening"',themes:[0,1,2,3]},
+{num:"II",name:"Internal Chaos Meets External Structure",theme:'"Trying to stabilize in a confusing world"',themes:[4,5,6,7]},
+{num:"III",name:"The Fracture Point",theme:'"When coping stops working"',themes:[8,9,10,11]},
+{num:"IV",name:"Integration and Growth",theme:'"Working with the brain, not against it"',themes:[12,13]}
+];
+
+const PAUSES=[
+{after:4,q:"Which of these felt most familiar?",opts:["I've been misunderstood like this","I've misunderstood someone else this way","I've never thought about ADHD like this"]},
+{after:8,q:"Whose perspective surprised you the most?",opts:["Mom's, I didn't realize how much she noticed","Dad's, his lens was different from what I expected","Sister's, siblings see things parents miss"]},
+{after:12,q:"When did your own coping strategies stop being enough?",opts:["Adolescence, just like this","Adulthood, when demands became invisible","I'm still figuring that out"]}
+];
+
+const slides=[];
+slides.push({type:'hero'});
+slides.push({type:'journey'});
+ACTS.forEach((act,ai)=>{
+  slides.push({type:'act',data:act});
+  act.themes.forEach(ti=>slides.push({type:'theme',data:THEMES[ti],index:ti}));
+  const pause=PAUSES.find(p=>p.after===act.themes[act.themes.length-1]+1);
+  if(pause) slides.push({type:'pause',data:pause});
+});
+slides.push({type:'closing'});
+
+let current=0;
+let transitioning=false;
+
+function buildSlides(){
+  const deck=document.getElementById('deck');
+  slides.forEach((s,i)=>{
+    const div=document.createElement('div');
+    div.className='slide'+(i===0?' active':'');
+    div.dataset.index=i;
+    if(s.type==='hero') div.innerHTML=buildHero();
+    else if(s.type==='journey') div.innerHTML=buildJourney();
+    else if(s.type==='act') div.innerHTML=buildAct(s.data);
+    else if(s.type==='theme') div.innerHTML=buildTheme(s.data);
+    else if(s.type==='pause') div.innerHTML=buildPause(s.data);
+    else if(s.type==='closing') div.innerHTML=buildClosing();
+    deck.appendChild(div);
+  });
+}
+
+function buildHero(){
+  return `<div class="atmosphere visible" style="background:radial-gradient(ellipse at 40% 50%,rgba(107,164,212,0.08) 0%,transparent 60%),radial-gradient(ellipse at 60% 40%,rgba(107,164,212,0.05) 0%,transparent 50%)"></div>
+  <div class="hero-content">
+    <h1 class="hero-title stagger">Same Child.<br>Different <em>Truths.</em></h1>
+    <p class="hero-sub stagger">Three people watched the same child grow up. Each one saw something different. This is what ADHD looks like when you stop watching the behavior and start seeing the brain behind it.</p>
+    <button class="hero-begin stagger" onclick="sparkleAndGo(this,1)">
+      Begin the Experience
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2l5 5-5 5"/></svg>
+    </button>
+  </div>`;
+}
+
+function buildJourney(){
+  const actItems = ACTS.map((a,i)=>{
+    const count = a.themes.length;
+    return `<div class="journey-act">
+      <div class="journey-dot">${a.num}</div>
+      <div class="journey-act-info">
+        <p class="journey-act-name">${a.name}</p>
+        <p class="journey-act-theme">${a.theme}</p>
+        <p class="journey-act-count">${count} perspectives</p>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="atmosphere visible" style="background:radial-gradient(ellipse at 50% 50%,rgba(107,174,142,0.04) 0%,transparent 60%)"></div>
+  <div class="journey-content">
+    <p class="journey-label stagger">Your Journey</p>
+    <h2 class="journey-title stagger">A story told in four acts, through three sets of eyes.</h2>
+    <div class="journey-acts stagger">${actItems}</div>
+    <button class="journey-begin stagger" onclick="sparkleAndGo(this,1)">
+      Enter Act I
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2l5 5-5 5"/></svg>
+    </button>
+    <p class="journey-time stagger">About 8 minutes</p>
+  </div>`;
+}
+
+function buildAct(act){
+  return `<div class="atmosphere visible" style="background:radial-gradient(ellipse at 50% 50%,rgba(107,164,212,0.04) 0%,transparent 60%)"></div>
+  <div class="act-content">
+    <p class="act-num stagger">Act ${act.num}</p>
+    <h2 class="act-name stagger">${act.name}</h2>
+    <p class="act-theme stagger">${act.theme}</p>
+  </div>`;
+}
+
+function buildTheme(t){
+  return `<div class="atmosphere visible" data-atm="neutral" style="background:radial-gradient(ellipse at 50% 50%,rgba(184,130,200,0.025) 0%,transparent 60%)"></div>
+  <div class="atmosphere" data-atm="mom" style="background:var(--mom-bg)"></div>
+  <div class="atmosphere" data-atm="dad" style="background:var(--dad-bg)"></div>
+  <div class="atmosphere" data-atm="sis" style="background:var(--sis-bg)"></div>
+  <div class="atmosphere" data-atm="reframe" style="background:var(--reframe-bg)"></div>
+  <div class="theme-inner">
+    <p class="theme-num stagger">${t.num} of 14</p>
+    <h2 class="theme-title stagger">${t.title}</h2>
+    <p class="core-truth stagger">${t.truth}</p>
+    <div class="persp-btns stagger">
+      <button class="persp-btn" data-p="mom" onclick="sparkleAndSwitch(this,'mom')">Mom's Lens</button>
+      <button class="persp-btn" data-p="dad" onclick="sparkleAndSwitch(this,'dad')">Dad's Lens</button>
+      <button class="persp-btn" data-p="sis" onclick="sparkleAndSwitch(this,'sis')">Sister's Lens</button>
+      <button class="persp-btn" data-p="reframe" onclick="sparkleAndSwitch(this,'reframe')">The Reframe</button>
+    </div>
+    <div class="persp-display stagger">
+      <div class="persp-spacer"></div>
+      <div class="persp-panel from-left" data-panel="mom">
+        <p class="persp-label" style="color:var(--mom-accent)">What Mom Saw</p>
+        <p class="persp-quote">${t.mom}</p>
+      </div>
+      <div class="persp-panel from-right" data-panel="dad">
+        <p class="persp-label" style="color:var(--dad-accent)">What Dad Saw</p>
+        <p class="persp-quote">${t.dad}</p>
+      </div>
+      <div class="persp-panel from-top" data-panel="sis">
+        <p class="persp-label" style="color:var(--sis-accent)">What Sister Saw</p>
+        <p class="persp-quote">${t.sis}</p>
+      </div>
+      <div class="persp-panel from-center" data-panel="reframe">
+        <div class="reframe-container">
+          <p class="reframe-label-main">The Reframe</p>
+          <div class="reframe-block reframe-looked">
+            <p class="reframe-block-label">What It Looked Like</p>
+            <p class="reframe-text">${t.looked}</p>
+          </div>
+          <div class="reframe-block reframe-was">
+            <p class="reframe-block-label">What It Actually Was</p>
+            <p class="reframe-text">${t.was}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="storyline stagger">
+      <p class="storyline-label">In My Own Words</p>
+      <p>${t.story}</p>
+    </div>
+  </div>`;
+}
+
+function buildPause(p){
+  const opts=p.opts.map(o=>`<button class="pause-opt" onclick="sparkleAndPick(this)">${o}</button>`).join('');
+  return `<div class="atmosphere visible" style="background:radial-gradient(ellipse at 50% 50%,rgba(212,160,92,0.05) 0%,transparent 60%)"></div>
+  <div class="pause-content">
+    <p class="pause-label stagger">Pause &amp; Reflect</p>
+    <p class="pause-question stagger">${p.q}</p>
+    <div class="pause-opts stagger">${opts}</div>
+  </div>`;
+}
+
+function buildClosing(){
+  return `<div class="atmosphere visible" style="background:var(--reframe-bg)"></div>
+  <div class="closing-content">
+    <div class="closing-rule stagger"></div>
+    <h2 class="closing-title stagger">This Was Never About <em>Attention</em></h2>
+    <ul class="closing-truths stagger">
+      <li>Regulation disguised as misbehavior</li>
+      <li>Intensity mistaken for immaturity</li>
+      <li>Obsession confused with inconsistency</li>
+      <li>A brain built for depth, not balance</li>
+    </ul>
+    <p class="closing-final stagger">Three people watched the same child. Each saw something different.<br>What are you seeing now?</p>
+
+  </div>`;
+}
+
+/* ===== SPARKLE ENGINE ===== */
+const sparkleColors=['#E8956A','#6BA4D4','#B882C8','#6BAE8E','#D4A05C','#E8956A','#6BA4D4','#B882C8'];
+
+function triggerSparkle(el){
+  const rect=el.getBoundingClientRect();
+  const cx=rect.left+rect.width/2;
+  const cy=rect.top+rect.height/2;
+
+  // Icon sparkle
+  const icon=document.createElement('img');
+  icon.src=`data:image/png;base64,${ICON}`;
+  icon.className='sparkle-icon';icon.onerror=()=>icon.remove();
+  icon.style.left=(cx-16)+'px';
+  icon.style.top=(cy-16)+'px';
+  document.body.appendChild(icon);
+  requestAnimationFrame(()=>icon.classList.add('burst'));
+  setTimeout(()=>icon.remove(),900);
+
+  // Particles
+  for(let i=0;i<8;i++){
+    const p=document.createElement('div');
+    p.className='sparkle-particle';
+    const angle=(Math.PI*2/8)*i + (Math.random()-0.5)*0.5;
+    const dist=30+Math.random()*40;
+    p.style.left=(cx-2)+'px';
+    p.style.top=(cy-2)+'px';
+    p.style.background=sparkleColors[i%sparkleColors.length];
+    p.style.setProperty('--px',Math.cos(angle)*dist+'px');
+    p.style.setProperty('--py',Math.sin(angle)*dist+'px');
+    p.style.animationDelay=(i*0.03)+'s';
+    document.body.appendChild(p);
+    requestAnimationFrame(()=>p.classList.add('burst'));
+    setTimeout(()=>p.remove(),800);
+  }
+}
+
+function sparkleAndGo(el,dir){
+  triggerSparkle(el);
+  setTimeout(()=>go(dir),120);
+}
+
+function sparkleAndSwitch(btn,persp){
+  triggerSparkle(btn);
+  switchPersp(btn,persp);
+}
+
+function sparkleAndPick(btn){
+  triggerSparkle(btn);
+  btn.closest('.pause-opts').querySelectorAll('.pause-opt').forEach(b=>b.classList.remove('picked'));
+  btn.classList.add('picked');
+}
+
+/* ===== PERSPECTIVE SWITCHING ===== */
+function switchPersp(btn,persp){
+  const slide=btn.closest('.slide');
+
+  // Buttons
+  slide.querySelectorAll('.persp-btn').forEach(b=>{
+    b.classList.remove('active-mom','active-dad','active-sis','active-reframe');
+  });
+  btn.classList.add('active-'+persp);
+
+  // Atmosphere
+  slide.querySelectorAll('.atmosphere').forEach(a=>a.classList.remove('visible'));
+  const atm=slide.querySelector(`.atmosphere[data-atm="${persp}"]`);
+  if(atm) atm.classList.add('visible');
+
+  // Panels: directional entry
+  slide.querySelectorAll('.persp-panel').forEach(p=>p.classList.remove('visible'));
+  const panel=slide.querySelector(`.persp-panel[data-panel="${persp}"]`);
+  if(panel) panel.classList.add('visible');
+
+  // Title color
+  const colors={mom:'var(--mom-accent)',dad:'var(--dad-accent)',sis:'var(--sis-accent)',reframe:'var(--reframe-accent)'};
+  slide.querySelector('.theme-title').style.color=colors[persp]||'';
+}
+
+/* ===== NAVIGATION ===== */
+function go(dir){
+  if(transitioning) return;
+  const next=current+dir;
+  if(next<0||next>=slides.length) return;
+
+  transitioning=true;
+  const allSlides=document.querySelectorAll('.slide');
+  const curr=allSlides[current];
+  const nxt=allSlides[next];
+
+  // Exit current with direction
+  curr.classList.remove('active');
+  curr.classList.add(dir>0?'exiting-up':'exiting-down');
+
+  // Reset stagger anims on next slide
+  nxt.querySelectorAll('.stagger').forEach(el=>{
+    el.style.animation='none';
+    el.offsetHeight; // force reflow
+    el.style.animation='';
+  });
+
+  // Enter next
+  nxt.style.transform=dir>0?'translateY(30px) scale(0.98)':'translateY(-30px) scale(0.98)';
+  nxt.style.opacity='0';
+  nxt.classList.add('entering');
+
+  requestAnimationFrame(()=>{
+    nxt.classList.add('active');
+    nxt.style.transform='';
+    nxt.style.opacity='';
+  });
+
+  // Reset theme perspective state
+  if(slides[next].type==='theme'){
+    nxt.querySelectorAll('.persp-btn').forEach(b=>b.classList.remove('active-mom','active-dad','active-sis','active-reframe'));
+    nxt.querySelectorAll('.persp-panel').forEach(p=>p.classList.remove('visible'));
+    nxt.querySelectorAll('.atmosphere').forEach(a=>a.classList.remove('visible'));
+    const n=nxt.querySelector('.atmosphere[data-atm="neutral"]');
+    if(n) n.classList.add('visible');
+  }
+
+  current=next;
+  updateNav();
+
+  setTimeout(()=>{
+    curr.classList.remove('exiting-up','exiting-down');
+    nxt.classList.remove('entering');
+    transitioning=false;
+  },650);
+}
+
+function updateNav(){
+  const nav=document.getElementById('navBar');
+  // Hide nav on hero and journey map slides
+  nav.style.display=(current<=1)?'none':'flex';
+  document.getElementById('prevBtn').disabled=current===0;
+  document.getElementById('nextBtn').disabled=current===slides.length-1;
+  document.getElementById('progressFill').style.width=(current/(slides.length-1))*100+'%';
+
+  // Build segmented act progress
+  const prog=document.getElementById('actProgress');
+  // Map current slide to which act and position within it
+  let html='';
+  ACTS.forEach((act,ai)=>{
+    // Find slide indices for this act's themes
+    const actSlideIndices=[];
+    slides.forEach((s,si)=>{
+      if(s.type==='act'&&s.data===act) actSlideIndices.push(si);
+      if(s.type==='theme'&&act.themes.includes(s.index)) actSlideIndices.push(si);
+      if(s.type==='pause'){
+        const pause=PAUSES.find(p=>p.after===act.themes[act.themes.length-1]+1);
+        if(pause&&s.data===pause) actSlideIndices.push(si);
+      }
+    });
+
+    const minIdx=Math.min(...actSlideIndices);
+    const maxIdx=Math.max(...actSlideIndices);
+    const isCurrentAct=current>=minIdx&&current<=maxIdx;
+    const isPast=current>maxIdx;
+
+    html+=`<div class="act-seg">`;
+    html+=`<span class="act-seg-label${isCurrentAct?' active-label':''}">${act.num}</span>`;
+
+    // One dot per theme in this act
+    act.themes.forEach((ti,di)=>{
+      const themeSlideIdx=slides.findIndex(s=>s.type==='theme'&&s.index===ti);
+      const isCurrent=current===themeSlideIdx;
+      const isFilled=current>themeSlideIdx;
+      let cls='act-seg-dot';
+      if(isCurrent) cls+=' current';
+      else if(isFilled||isPast) cls+=' filled';
+      html+=`<div class="${cls}"></div>`;
+    });
+    html+=`</div>`;
+    if(ai<ACTS.length-1) html+=`<div class="act-seg-gap"></div>`;
+  });
+  prog.innerHTML=html;
+}
+
+// Keyboard
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key==='ArrowDown') go(1);
+  if(e.key==='ArrowLeft'||e.key==='ArrowUp') go(-1);
+});
+
+// Touch swipe
+let tx=0,ty=0,ttime=0;
+document.addEventListener('touchstart',e=>{tx=e.touches[0].clientX;ty=e.touches[0].clientY;ttime=Date.now()},{passive:true});
+document.addEventListener('touchend',e=>{
+  // Ignore if touch originated on a button/interactive element
+  if(e.target.closest('button,a,.persp-btn,.pause-opt,.nav-btn')) return;
+  const dx=e.changedTouches[0].clientX-tx;
+  const dy=e.changedTouches[0].clientY-ty;
+  const dt=Date.now()-ttime;
+  // Only count as swipe if moved far enough and not too slow (>800ms = scroll attempt)
+  if(dt>800) return;
+  if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>50) go(dx<0?1:-1);
+  else if(Math.abs(dy)>Math.abs(dx)&&Math.abs(dy)>50) go(dy<0?1:-1);
+},{passive:true});
+
+// Nav button sparkles (skip if disabled)
+document.getElementById('prevBtn').addEventListener('click',function(){if(!this.disabled)triggerSparkle(this)});
+document.getElementById('nextBtn').addEventListener('click',function(){if(!this.disabled)triggerSparkle(this)});
+
+buildSlides();
+updateNav();
+</script>
+</body>
+</html>
